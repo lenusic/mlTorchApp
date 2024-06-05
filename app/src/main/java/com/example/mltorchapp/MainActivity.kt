@@ -102,44 +102,45 @@ class MainActivity : AppCompatActivity(), Runnable {
         var flattenedPoints = mutableListOf<Float>()
 
         for (stroke in points) {
-            if (stroke.isEmpty()) continue
-
             val xPoints = stroke.map { it.first }
             val yPoints = stroke.map { it.second }
             val timeStamps = stroke.map { it.third.toFloat() }
 
-            // Normalize x and y coordinates
+            // Normalize coordinates to fit within [0, 1]
             val minX = xPoints.minOrNull() ?: 0f
             val maxX = xPoints.maxOrNull() ?: 1f
             val minY = yPoints.minOrNull() ?: 0f
             val maxY = yPoints.maxOrNull() ?: 1f
+
             val normalizedX = xPoints.map { (it - minX) / (maxX - minX).coerceAtLeast(1e-9f) }
             val normalizedY = yPoints.map { (it - minY) / (maxY - minY).coerceAtLeast(1e-9f) }
 
-            // Calculate features
+            // Ensure we follow the same feature extraction as in Python code
             val totalLength = calculateTotalLength(normalizedX, normalizedY)
             val directness = calculateDirectness(normalizedX, normalizedY)
-            val (avgSinDir, avgCosDir) = calculateAverageSinCosDirection(normalizedX, normalizedY)
-            val (avgSinCurv, avgCosCurv) = calculateAverageSinCosCurvature(normalizedX, normalizedY)
+            val totalCurvature = calculateTotalCurvature(normalizedX, normalizedY)
+            val (avgSinDirection, avgCosDirection) = calculateAverageSinCosDirection(normalizedX, normalizedY)
+            val (avgSinCurvature, avgCosCurvature) = calculateAverageSinCosCurvature(normalizedX, normalizedY)
             val endPointDiff = calculateEndPointDiff(normalizedX, normalizedY)
             val controlPointDistributions = calculateControlPointDistributions(normalizedX, normalizedY, endPointDiff)
             val angles = calculateAngles(normalizedX, normalizedY)
             val timeCoefficients = calculateTimeCoefficients(timeStamps)
             val penUpFlag = if (stroke.last().third == 1L) 1f else 0f
 
-            // Add features to list
-            flattenedPoints.add(totalLength)
-            flattenedPoints.add(directness)
-            flattenedPoints.add(avgSinDir)
-            flattenedPoints.add(avgCosDir)
-            flattenedPoints.add(avgSinCurv)
-            flattenedPoints.add(avgCosCurv)
+            // Flatten points for model input
+            flattenedPoints.addAll(listOf(totalLength, directness, totalCurvature, avgSinDirection, avgCosDirection, avgSinCurvature, avgCosCurvature))
             flattenedPoints.addAll(endPointDiff)
             flattenedPoints.addAll(controlPointDistributions)
             flattenedPoints.addAll(angles)
             flattenedPoints.addAll(timeCoefficients)
             flattenedPoints.add(penUpFlag)
         }
+
+        // Check for NaN values and replace with 0f
+        flattenedPoints = flattenedPoints.map { if (it.isNaN()) 0f else it }.toMutableList()
+
+        // Log values before padding
+        Log.d("PytorchDemo", "Serialized Stroke Data Before Padding: ${flattenedPoints.joinToString(", ")}")
 
         // Ensure the serialized data matches the expected size
         val expectedSize = EXPECTED_INPUT_SIZE
@@ -148,16 +149,24 @@ class MainActivity : AppCompatActivity(), Runnable {
             // Pad with zeros
             flattenedPoints.addAll(List(expectedSize - flattenedPoints.size) { 0f })
             Log.d("PytorchDemo", "Serialized Stroke Data Size: ${flattenedPoints.size} (padded)")
-            Log.d("PytorchDemo", "Expected Size: $expectedSize")
         } else if (flattenedPoints.size > expectedSize) {
             // Truncate the array
             flattenedPoints = flattenedPoints.take(expectedSize).toMutableList()
             Log.d("PytorchDemo", "Serialized Stroke Data Size: ${flattenedPoints.size} (truncated)")
-            Log.d("PytorchDemo", "Expected Size: $expectedSize")
         }
+
+        Log.d("PytorchDemo", "Serialized Stroke Data After Padding: ${flattenedPoints.joinToString(", ")}")
+        Log.d("PytorchDemo", "Expected Size: $expectedSize")
 
         return predictWithTensor(flattenedPoints.toFloatArray())
     }
+
+
+
+
+
+
+
     private fun calculateTotalLength(xPoints: List<Float>, yPoints: List<Float>): Float {
         var length = 0f
         for (i in 1 until xPoints.size) {
@@ -206,13 +215,34 @@ class MainActivity : AppCompatActivity(), Runnable {
 
 
     private fun predictWithTensor(flattenedPoints: FloatArray): String? {
-        val inputTensor = Tensor.fromBlob(flattenedPoints, longArrayOf(1, EXPECTED_SIZE.toLong(), FEATURE_SIZE.toLong()))
-        val modelOutput = mModule?.forward(IValue.from(inputTensor))?.toTensor()
-        val outputIndices = modelOutput?.dataAsFloatArray ?: return null
+        // Check for NaN values in the flattenedPoints array and replace them with 0f
+        for (i in flattenedPoints.indices) {
+            if (flattenedPoints[i].isNaN()) {
+                flattenedPoints[i] = 0f
+            }
+        }
 
-        val probabilities = softmax(outputIndices)
-        return processModelOutput(probabilities)
+        // Check for extreme values and log them
+        val maxVal = flattenedPoints.maxOrNull()
+        val minVal = flattenedPoints.minOrNull()
+        Log.d("PytorchDemo", "Max value in input tensor: $maxVal")
+        Log.d("PytorchDemo", "Min value in input tensor: $minVal")
+
+        Log.d("PytorchDemo", "Input Tensor: ${flattenedPoints.joinToString(", ")}")
+        val inputTensor = Tensor.fromBlob(flattenedPoints, longArrayOf(1, EXPECTED_SIZE.toLong(), FEATURE_SIZE.toLong()))
+        try {
+            val modelOutput = mModule?.forward(IValue.from(inputTensor))?.toTensor()
+            val outputIndices = modelOutput?.dataAsFloatArray ?: return null
+            Log.d("PytorchDemo", "Model Output Indices: ${outputIndices.joinToString(", ")}")
+            return processModelOutput(outputIndices)
+        } catch (e: Exception) {
+            Log.e("PytorchDemo", "Error during model inference", e)
+            return null
+        }
     }
+
+
+
     private fun softmax(logits: FloatArray): FloatArray {
         val maxLogit = logits.maxOrNull() ?: 0f
         val expScores = logits.map { exp(it - maxLogit) }
@@ -275,6 +305,20 @@ class MainActivity : AppCompatActivity(), Runnable {
 
         return stringBuilder.toString()
     }
+    private fun calculateTotalCurvature(xPoints: List<Float>, yPoints: List<Float>): Float {
+        var totalCurvature = 0f
+        for (i in 2 until xPoints.size) {
+            val dx1 = xPoints[i - 1] - xPoints[i - 2]
+            val dy1 = yPoints[i - 1] - yPoints[i - 2]
+            val dx2 = xPoints[i] - xPoints[i - 1]
+            val dy2 = yPoints[i] - yPoints[i - 1]
+            val angle1 = atan2(dy1, dx1)
+            val angle2 = atan2(dy2, dx2)
+            totalCurvature += abs(angle2 - angle1)
+        }
+        return totalCurvature
+    }
+
 
     private fun processModelOutput(outputs: FloatArray): String {
         val stringBuilder = StringBuilder()
