@@ -18,6 +18,8 @@ class DrawingView(context: Context, attrs: AttributeSet) : View(context, attrs) 
     private var lastX = 0f
     private var lastY = 0f
     private val paths = mutableListOf<PathData>()
+    private var lastStrokeTime: Long = 0
+    private val newCharacterThreshold = 500  // Time in milliseconds
 
     init {
         paint.apply {
@@ -48,10 +50,15 @@ class DrawingView(context: Context, attrs: AttributeSet) : View(context, attrs) 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x
         val y = event.y
-        val timestamp = SystemClock.uptimeMillis().toFloat()
+        val eventTime = SystemClock.uptimeMillis()
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
+                // Check if the time since the last stroke exceeds the threshold
+                if (eventTime - lastStrokeTime > newCharacterThreshold) {
+                    // Start a new stroke for a new character
+                    strokes.clear()
+                }
                 path.moveTo(x, y)
                 currentStroke.moveTo(x, y)
                 lastX = x
@@ -69,15 +76,16 @@ class DrawingView(context: Context, attrs: AttributeSet) : View(context, attrs) 
             MotionEvent.ACTION_UP -> {
                 currentStroke.lineTo(x, y)
                 strokes.add(currentStroke)
-                paths.add(PathData(currentStroke.asPoints()))
+                paths.add(PathData(currentStroke.asPoints(eventTime))) // Pass the timestamp here
                 currentStroke = Path()
+                lastStrokeTime = eventTime
                 invalidate()
             }
         }
         return true
     }
 
-    private fun Path.asPoints(): List<Triple<Float, Float, Long>> {
+    private fun Path.asPoints(timestamp: Long): List<Triple<Float, Float, Long>> {
         val points = mutableListOf<Triple<Float, Float, Long>>()
         val pathMeasure = android.graphics.PathMeasure(this, false)
         val pathLength = pathMeasure.length
@@ -87,7 +95,7 @@ class DrawingView(context: Context, attrs: AttributeSet) : View(context, attrs) 
 
         while (distance < pathLength) {
             pathMeasure.getPosTan(distance, coordinates, null)
-            points.add(Triple(coordinates[0], coordinates[1], SystemClock.uptimeMillis()))
+            points.add(Triple(coordinates[0], coordinates[1], timestamp))
             distance += interval
         }
         return points

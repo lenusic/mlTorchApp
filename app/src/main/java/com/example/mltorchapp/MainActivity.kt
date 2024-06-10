@@ -17,6 +17,8 @@ import kotlin.math.*
 
 class MainActivity : AppCompatActivity(), Runnable {
 
+    private lateinit var rawData: FloatArray
+
     private var mModule: Module? = null
 
     private lateinit var mResultTextView: TextView
@@ -25,12 +27,18 @@ class MainActivity : AppCompatActivity(), Runnable {
     private lateinit var mDrawView: DrawingView
 
     private val indexToChar = mapOf(
-        0 to ' ', 1 to 'a', 2 to 'b', 3 to 'c', 4 to 'd', 5 to 'e', 6 to 'f', 7 to 'g', 8 to 'h',
-        9 to 'i', 10 to 'j', 11 to 'k', 12 to 'l', 13 to 'm', 14 to 'n', 15 to 'o', 16 to 'p', 17 to 'q',
-        18 to 'r', 19 to 's', 20 to 't', 21 to 'u', 22 to 'v', 23 to 'w', 24 to 'x', 25 to 'y', 26 to 'z',
-        27 to '0', 28 to '1', 29 to '2', 30 to '3', 31 to '4', 32 to '5', 33 to '6', 34 to '7', 35 to '8',
-        36 to '9', 37 to ',', 38 to '.', 39 to '?', 40 to '!'
+        0 to ' ', 1 to '!', 2 to '"', 3 to '#', 4 to '&', 5 to '\'', 6 to '(', 7 to ')', 8 to '*',
+        9 to '+', 10 to ',', 11 to '-', 12 to '.', 13 to '/', 14 to '0', 15 to '1', 16 to '2',
+        17 to '3', 18 to '4', 19 to '5', 20 to '6', 21 to '7', 22 to '8', 23 to '9', 24 to ':',
+        25 to ';', 26 to '?', 27 to 'A', 28 to 'B', 29 to 'C', 30 to 'D', 31 to 'E', 32 to 'F',
+        33 to 'G', 34 to 'H', 35 to 'I', 36 to 'J', 37 to 'K', 38 to 'L', 39 to 'M', 40 to 'N',
+        41 to 'O', 42 to 'P', 43 to 'Q', 44 to 'R', 45 to 'S', 46 to 'T', 47 to 'U', 48 to 'V',
+        49 to 'W', 50 to 'X', 51 to 'Y', 52 to 'Z', 53 to '[', 54 to ']', 55 to 'a', 56 to 'b',
+        57 to 'c', 58 to 'd', 59 to 'e', 60 to 'f', 61 to 'g', 62 to 'h', 63 to 'i', 64 to 'j',
+        65 to 'k', 66 to 'l', 67 to 'm', 68 to 'n', 69 to 'o', 70 to 'p', 71 to 'q', 72 to 'r',
+        73 to 's', 74 to 't', 75 to 'u', 76 to 'v', 77 to 'w', 78 to 'x', 79 to 'y', 80 to 'z'
     )
+
 
 
     companion object {
@@ -90,12 +98,11 @@ class MainActivity : AppCompatActivity(), Runnable {
         val result = processDrawingAndPredict()
         result?.let { prediction ->
             runOnUiThread {
-                mResultTextView.text = prediction
-                mDrawView.clearCanvas()
+                mResultTextView.append(prediction)  // Append the character to the result view
+                mDrawView.clearCanvas()  // Clear canvas if needed after each character
             }
         }
     }
-
 
     private fun processDrawingAndPredict(): String? {
         val strokes = mDrawView.getAllPoints()
@@ -146,49 +153,48 @@ class MainActivity : AppCompatActivity(), Runnable {
                 flattenedPoints = flattenedPoints.take(EXPECTED_INPUT_SIZE).toMutableList()
             }
 
-            return predictWithTensor(flattenedPoints.toFloatArray())
+            // Clean the data to avoid NaNs and Infinities
+            val cleanedData = cleanData(flattenedPoints.toFloatArray())
+
+            return predictWithTensor(cleanedData)
         } catch (e: Exception) {
             Log.e("PytorchDemo", "Error during preprocessing or inference", e)
             return null
         }
     }
 
+    private fun cleanData(inputData: FloatArray): FloatArray {
+        return inputData.map {
+            when {
+                it.isNaN() -> 0.0f
+                it.isInfinite() -> 0.0f
+                else -> it
+            }
+        }.toFloatArray()
+    }
 
 
-
-//    private fun predictWithTensor(flattenedPoints: FloatArray): String? {
-//        // Check for NaN values in the flattenedPoints array and replace them with 0f
-//        for (i in flattenedPoints.indices) {
-//            if (flattenedPoints[i].isNaN()) {
-//                flattenedPoints[i] = 0f
-//            }
-//        }
-//
-//        // Check for extreme values and log them
-//        val maxVal = flattenedPoints.maxOrNull()
-//        val minVal = flattenedPoints.minOrNull()
-//        Log.d("PytorchDemo", "Max value in input tensor: $maxVal")
-//        Log.d("PytorchDemo", "Min value in input tensor: $minVal")
-//
-//        Log.d("PytorchDemo", "Input Tensor: ${flattenedPoints.joinToString(", ")}")
-//        val inputTensor = Tensor.fromBlob(flattenedPoints, longArrayOf(1, EXPECTED_SIZE.toLong(), FEATURE_SIZE.toLong()))
-//        try {
-//            val modelOutput = mModule?.forward(IValue.from(inputTensor))?.toTensor()
-//            val outputIndices = modelOutput?.dataAsFloatArray ?: return null
-//            Log.d("PytorchDemo", "Model Output Indices: ${outputIndices.joinToString(", ")}")
-//            return processModelOutput(outputIndices)
-//        } catch (e: Exception) {
-//            Log.e("PytorchDemo", "Error during model inference", e)
-//            return null
-//        }
-//    }
 
     private fun predictWithTensor(flattenedPoints: FloatArray): String? {
         val inputTensor = Tensor.fromBlob(flattenedPoints, longArrayOf(1, EXPECTED_SIZE.toLong(), FEATURE_SIZE.toLong()))
+        Log.d("PytorchDemo", "Input Tensor Shape: ${inputTensor.shape().joinToString()}")
+        Log.d("PytorchDemo", "Input Tensor Values: ${flattenedPoints.joinToString()}")
         return try {
             val modelOutput = mModule?.forward(IValue.from(inputTensor))?.toTensor()
+            Log.d("PytorchDemo", "Model Output Shape: ${modelOutput?.shape()?.joinToString()}")
             val outputIndices = modelOutput?.dataAsFloatArray ?: return null
-            processModelOutput(outputIndices)
+            Log.d("PytorchDemo", "Logits before softmax: ${outputIndices.joinToString()}")
+
+            // Ensure that the output size is correct
+            val expectedOutputSize = 81  // Adjust to the number of classes in your model
+            if (outputIndices.size != expectedOutputSize * EXPECTED_SIZE) {
+                Log.e("PytorchDemo", "Unexpected output size: ${outputIndices.size}, expected: ${expectedOutputSize * EXPECTED_SIZE}")
+                return "?"  // Indicate an error with a placeholder character
+            }
+
+            val decodedResult = processModelOutput(outputIndices)
+            Log.d("PytorchDemo", "Decoded result: $decodedResult")
+            decodedResult
         } catch (e: Exception) {
             Log.e("PytorchDemo", "Error during model inference", e)
             null
@@ -197,27 +203,39 @@ class MainActivity : AppCompatActivity(), Runnable {
 
 
     private fun softmax(logits: FloatArray): FloatArray {
-        val maxLogit = logits.maxOrNull() ?: 0f
-        val expScores = logits.map { exp(it - maxLogit) }
-        val sumExpScores = expScores.sum()
-        return expScores.map { it / sumExpScores }.toFloatArray()
+        val maxLogit = logits.maxOrNull() ?: Float.NEGATIVE_INFINITY
+        val exps = logits.map { Math.exp((it - maxLogit).toDouble()).toFloat() }
+        val sumExps = exps.sum()
+        return exps.map { it / sumExps }.toFloatArray()
     }
 
     private fun processModelOutput(outputs: FloatArray): String {
-        val stringBuilder = StringBuilder()
-        val numClasses = 41  // Number of output classes
+        val numClasses = 81  // Number of output classes
+        val classProbabilities = softmax(outputs)
+        val maxIndex = classProbabilities.indices.maxByOrNull { classProbabilities[it] } ?: 0
+        val character = indexToChar[maxIndex] ?: '?'
 
-        for (i in outputs.indices step numClasses) {
-            val classLogits = outputs.sliceArray(i until i + numClasses)
-            val classProbabilities = softmax(classLogits)
-            val maxIndex = classProbabilities.indices.maxByOrNull { classProbabilities[it] } ?: 0
-            val character = indexToChar[maxIndex] ?: '?'
-            stringBuilder.append(character)
+        // Ensure maxIndex is within the expected range
+        if (maxIndex < 0 || maxIndex >= numClasses) {
+            Log.e("ModelOutput", "Invalid index: $maxIndex")
+            return "?"
         }
 
-        return stringBuilder.toString()
-    }
+        // Check if maxIndex is within indexToChar keys
+        if (!indexToChar.containsKey(maxIndex)) {
+            Log.e("ModelOutput", "maxIndex not found in indexToChar map: $maxIndex")
+            return "?"
+        }
 
+        // Log the outputs for debugging
+        Log.d("ModelOutput", "Logits: ${outputs.joinToString(", ")}")
+        Log.d("ModelOutput", "Softmax: ${classProbabilities.joinToString(", ")}")
+        Log.d("ModelOutput", "Character: $character")
+        Log.d("ModelOutput", "MaxIndex: $maxIndex, Character: $character")
+
+        // Return the single most likely character
+        return character.toString()
+    }
 
     private fun calculateTotalLength(xPoints: List<Float>, yPoints: List<Float>): Float {
         var length = 0f
@@ -307,6 +325,4 @@ class MainActivity : AppCompatActivity(), Runnable {
 
         return Pair((sinSum / curvatures.size).toFloat(), (cosSum / curvatures.size).toFloat())
     }
-
-
 }
